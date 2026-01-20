@@ -56,8 +56,8 @@ RUN vcs import src --skip-existing --input src/ros2_kortex/simulation.humble.rep
 
 # Build the colcon_ws
 RUN source /opt/ros/humble/setup.bash && \
-    colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 3 --symlink-install
-
+    colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release --parallel-workers 4
+    
 # Copy overlay_ws to docker image
 COPY overlay_ws/src/ /overlay_ws/src/
 
