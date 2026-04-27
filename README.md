@@ -1,228 +1,256 @@
-# ROS 2 Kortex – RSS Project
-### *Simulation-Only Environment for Controlling a Virtual Kinova Gen3 Arm Using Sensor Data*
+RSS Project - Sensor-Controlled Robotic Arm
+A real-time system that uses physical sensors (ESP8266, MPU6050, IR sensor, rotary encoder) to control a simulated 6-DOF robotic arm via ROS 2.
+Project Overview
+This project creates an interactive robotic arm system where physical sensor inputs trigger emotional states (Happy, Scared, Bored) that control the arm's behavior:
 
----
+Happy State: Triggered by IR sensor detection, makes the arm wave with adjustable speed based on encoder rotation
+Scared State: Triggered by sudden movements (jolt detection), makes the arm recoil defensively
+Bored State: Default resting position when no stimuli are detected for 10 sec
 
-## 🎯 Purpose of This Workspace
-This repository provides a **Dockerized ROS 2 environment** for working with the Kinova Gen3 robotic arm **entirely in simulation**.  
-It is tailored for the **RSS Project**, where students must:
+System Architecture
+The system consists of 5 main components communicating via ROS 2 topics:
+ESP8266 Hardware → UDP Bridge → Sensor Parser → State Estimator → Robot Controller → RViz2
+Component Flow
 
-- Read sensor data from microcontrollers (e.g., ESP8266/MPU6050)  
-- Send this data to ROS 2 over Wi-Fi  
-- Map sensor values to robot motions  
-- Control a **simulated Kinova Gen3 arm** in real time  
+ESP8266 (Arduino): Reads sensor data and broadcasts via UDP
+UDP Bridge (udp_bridge.py): Receives UDP packets and publishes to /imu_raw
+Sensor Parser (sensor_parser.py): Applies moving average filter, publishes to /imu_filtered
+State Estimator (state_estimator.py): Determines robot state based on sensor inputs, publishes to /imu_control
+Robot Controller (robot_controller.py): Controls joint positions based on state, publishes to joint trajectory controller
 
-**No real robot is required.**  
-**No IP address or hardware connection is needed.**
+Hardware Components
 
-This workspace includes:
-- **URDF visualization**
-- **ros2_control with fake hardware** (primary mode)
-- **MoveIt2 for motion planning**
-- **Gazebo/Ignition for 3D simulation**
+ESP8266: WiFi microcontroller 
+MPU6050: 6-axis gyroscope and accelerometer for motion detection
+IR Sensor: Infrared proximity sensor (GPIO 16)
+Rotary Encoder: Controls happy animation speed (GPIO 14, 12)
+Breadboards and jumpers for connections
 
----
+Software Requirements
+On Ubuntu Linux
+For more refer Docker file
 
-## 📦 Installation Instructions
+On Development Machine
 
-### 1. Clone the Repository
+Arduino IDE
+ESP8266 board support (via Board Manager)
+Libraries:
 
-Each project group has its own repository named:
+Adafruit_MPU6050
+ESP8266WiFi
+WiFiUdp
 
-**RSS_WS26_Project_Group_<GROUP_NUMBER>**
 
-To clone your group’s repository, use the following command (replacing <GROUP_NUMBER> with the number of your group):
 
+Hardware Setup
+Wiring Connections
+MPU6050 to ESP8266:
+
+SDA → GPIO 4 (D2)
+SCL → GPIO 5 (D1)
+VCC → 3.3V
+GND → GND
+
+IR Sensor:
+
+OUT → GPIO 16 (D0)
+VCC → 3.3V
+GND → GND
+
+Rotary Encoder:
+
+CLK → GPIO 14 (D5)
+DT → GPIO 12 (D6)
+VCC → 3.3V
+GND → GND
+
+Software Installation
+1. Arduino Setup
+bash# Install Arduino IDE from arduino.cc
+
+# Add ESP8266 board support:
+# File → Preferences → Additional Board Manager URLs:
+http://arduino.esp8266.com/stable/package_esp8266com_index.json
+
+# Tools → Board Manager → Search "ESP8266" → Install
+
+# Install libraries via Library Manager:
+# - Adafruit MPU6050
+# - Adafruit Unified Sensor (dependency)
+2. ROS 2 Workspace Setup
+bash# Create workspace
+mkdir -p ~/ros2_ws/src
+cd ~/ros2_ws/src
+
+# Clone or copy the Python nodes
+mkdir robot_control
+cd robot_control
+# Copy: udp_bridge.py, sensor_parser.py, state_estimator.py, robot_controller.py
+
+# Make scripts executable
+chmod +x *.py
+
+# Build workspace
+cd ~/ros2_ws
+colcon build
+source install/setup.bash
+Configuration
+Arduino Code
+Edit WiFi credentials in the ESP8266 code:
+cppconst char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
+Adjustable Parameters
+In ESP8266 code:
+
+JOLT_G: Acceleration threshold for scared state (default: 1.1g)
+port: UDP port (default: 4242)
+
+In Python nodes:
+
+State durations in state_estimator.py (default: 10 seconds)
+Moving average window in sensor_parser.py (default: 5 samples)
+Joint angles in robot_controller.py for each emotional pose
+
+Running the Project
+1. Upload Arduino Code
+
+Connect ESP8266 via USB
+Select board: "Generic ESP8266 Module" or "NodeMCU 1.0"
+Upload the code
+Open Serial Monitor to verify broadcast IP
+
+### 2. Launch ROS 2 Nodes
+
+**Option 1: Using Launch File (Recommended)**
 ```bash
-git clone --recurse-submodules https://git-ce.rwth-aachen.de/wzl-mq-ms/forschung-lehre/robotic-sensor-systems/rss_ws26_project_group_<GROUP_NUMBER>.git
-
-cd rss_ws26_project_group_<GROUP_NUMBER>
+# Launch all sensor processing nodes at once
+ros2 launch sensor_pipeline pipeline.launch.py
 ```
 
-If you forgot `--recurse-submodules`:
+**Option 2: Manual Launch (for debugging)**
 
+Open 4 separate terminals and run:
 ```bash
-git submodule update --init --recursive
+# Terminal 1: UDP Bridge
+ros2 run robot_control udp_bridge.py
+
+# Terminal 2: Sensor Parser
+ros2 run robot_control sensor_parser.py
+
+# Terminal 3: State Estimator
+ros2 run robot_control state_estimator.py
+
+# Terminal 4: Robot Controller
+ros2 run robot_control robot_controller.py
 ```
 
----
-
-### 2. Build the Docker Image
-
-Run from the root folder:
-
+**Verify UDP reception (optional):**
 ```bash
-bash docker_build.sh
+# Test UDP packets are being received on port 4242
+nc -ul 4242
 ```
 
-This builds the image:
-
-```
-ros2-kortex:latest
-```
-
----
-
-### 3. Run the Docker Container
-
+### 3. Launch Robot Simulation with RViz2
 ```bash
-cd docker_run
-bash docker_run.sh
+ros2 launch gen3_bottle_description gen3_with_bottle.launch.py \
+  robot_ip:=0.0.0.1 \
+  use_fake_hardware:=true \
+  launch_rviz:=true
 ```
 
-This opens a ready-to-use ROS 2 Humble environment.
+This will:
+- Load the Gen3 robot with bottle description
+- Start fake hardware interface for simulation
+- Automatically launch RViz2 for visualization
 
----
+# Add RobotModel display
+# Set Fixed Frame to appropriate link (generally world)
+# Set joints topic
 
-# 🤖 Running the Simulated Kinova Robot
+Testing & Interaction
+Triggering States
 
-### Source the environment
-Inside the container:
+Happy State: Wave hand in front of IR sensor
 
-```bash
-source /opt/ros/humble/setup.bash
-source /colcon_ws/install/setup.bash
-```
+Arm waves back and forth
+Rotate encoder clockwise for faster waving (2x speed)
+Rotate encoder counter-clockwise for slower waving (0.5x speed)
 
----
 
-# 🔷 Option 1 — URDF Visualization Only
+Scared State: Shake or jolt the ESP8266
 
-```bash
-ros2 launch kortex_description view_robot.launch.py
-```
+Arm recoils into defensive position
+Lasts 10 seconds unless another state is triggered
 
-Arguments:
-- `robot_type:=gen3`
-- `dof:=7`
-- `gripper:=robotiq_2f_85`
 
----
+Bored State: Leave sensors untouched
 
-# 🔷 Option 2 — Fake Hardware (Recommended for RSS Project)
+Arm returns to neutral resting position
 
-This is the **primary mode** for the assignment.
 
-It loads:
-- ros2_control controllers  
-- Fake hardware interface  
-- Joint state publisher  
-- Action servers  
-- Command interfaces  
-- Full TF tree  
 
-Launch:
+Monitoring Topics
+bash# View raw sensor data
+ros2 topic echo /imu_raw
 
-```bash
-ros2 launch kortex_bringup gen3.launch.py     use_fake_hardware:=true
-```
+# View filtered sensor data
+ros2 topic echo /imu_filtered
 
-Provides ROS interfaces such as:
+# View current state and gain
+ros2 topic echo /imu_control
 
-- `/joint_states`
-- `/joint_trajectory_controller/command`
-- `/joint_trajectory_controller/follow_joint_trajectory`
+# View joint commands
+ros2 topic echo /joint_trajectory_controller/joint_trajectory
+What We Implemented
+Core Features
 
-Perfect for real-time control from sensors.
+Multi-sensor integration: Combined MPU6050, IR sensor, and rotary encoder into unified system
+State machine: Three emotional states with smooth transitions
+Real-time control: 50Hz sensor sampling with filtered data processing
+UDP broadcast communication: Automatic network discovery for flexible deployment
+Modular ROS 2 architecture: Separation of concerns across 4 specialized nodes
 
----
+Technical Highlights
 
-# 🔷 Option 3 — MoveIt2 Simulation
+Moving average filter: Reduces sensor noise for stable state detection
+Interrupt-driven encoder: Accurate tick counting without polling
+Dynamic animation speed: User-adjustable waving speed via encoder
+State persistence: 10-second state duration prevents rapid switching
+Graceful transitions: Smooth joint movements between emotional poses
 
-```bash
-ros2 launch kinova_gen3_7dof_robotiq_2f_85_moveit_config sim.launch.py     use_sim_time:=true
-```
+Robot Behaviors
 
-MoveIt2 enables:
+Happy: Joint 1 oscillates ±90° at variable speed while joints 4 and 6 bend
+Scared: Quick recoil to protective position with raised joints
+Bored: Relaxed neutral pose with minimal joint angles
 
-- Trajectory generation  
-- Collision checking  
-- Visual planning  
+Troubleshooting
+ESP8266 not connecting:
 
----
+Verify WiFi credentials
+Check that router allows broadcast packets
+Ensure ESP8266 is on same subnet as Linux machine
 
-# 🛰️ Integrating Sensors (Project Goal)
+No data in ROS 2:
 
-Students typically:
+Verify UDP port 4242 is not blocked by firewall
+Check broadcast IP calculation in Serial Monitor
+Confirm all nodes are running: ros2 node list
 
-### 1. Publish sensor data to ROS 2
-Example:
+Arm not moving:
 
-```bash
-ros2 topic pub /my_sensor std_msgs/Float32 "data: 0.8"
-```
+Ensure robot URDF and controller are properly configured
+Check joint trajectory topic is being published: ros2 topic hz /joint_trajectory_controller/joint_trajectory
+Verify joint names match your robot description
 
-### 2. Map sensor → joint command
-Conceptual flow:
 
-```
-sensor value → normalization → position target → trajectory command
-```
+Future Enhancements
 
-### 3. Send commands to the robot
+Add temperature-based behavior (using MPU6050 temp sensor)
+Implement gesture recognition using gyroscope data
+Add voice feedback or LED indicators
+Create custom emotional poses
+Multi-robot coordination
 
-```bash
-ros2 topic pub /joint_trajectory_controller/commands   trajectory_msgs/msg/JointTrajectory "..."
-```
-
-The fake hardware simulates execution.
-
----
-
-# 🛠 Useful ROS 2 Commands
-
-```bash
-ros2 topic list
-ros2 topic echo /joint_states
-ros2 control list_controllers
-rviz2
-```
-
----
-
-# ⚠️ Important Notes
-
-- ❌ Do NOT connect to a physical robot  
-- ❌ Do NOT set `robot_ip`  
-- ❌ Do NOT install hardware drivers  
-
-This workspace is purely for simulation.
-
----
-
-# 🧰 Troubleshooting
-
-### RViz does not start
-```bash
-rviz2 --disable-qt5-fix
-```
-
-### Topics missing
-```bash
-source /colcon_ws/install/setup.bash
-```
-
-### DDS issues
-```bash
-export ROS_DOMAIN_ID=5
-```
-
----
-
-# 🌐 Optional: Gazebo/Ignition Simulation
-
-Advanced students may explore 3D physics simulation.
-
-Example Ignition launch (if configured):
-
-```bash
-ros2 launch kortex_description gen3_ignition.launch.py
-```
-
-Or include URDF manually in custom Gazebo worlds.
-
-This is not required for the RSS Project but is available for exploration.
-
----
-
-# 📘 End of README
+Team & Credits
+RSS Project Team 14 - Winter Semester 2025/26
